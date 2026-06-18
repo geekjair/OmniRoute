@@ -1,6 +1,6 @@
 ---
 name: omni-remote-cli
-description: "Use the project-local OmniRoute Remote CLI to control a running OmniRoute platform over HTTP. Use when the user asks to remotely control OmniRoute, inspect or manage providers/models/combos/settings/cache/version-manager/shutdown via the generated remote-control-cli, configure ~/.omniroute/remote-cli.json, or needs AI-friendly CLI invocation with JSON envelopes, dry-run, --yes safeguards, and actionable error hints."
+description: "Use the project-local OmniRoute Remote CLI to control a running OmniRoute platform over HTTP. Use when the user asks to remotely control OmniRoute, inspect or manage providers/models/combos/settings/cache/logs/version-manager/shutdown via the generated remote-control-cli, configure ~/.omniroute/remote-cli.json, analyze platform logs, or needs AI-friendly CLI invocation with JSON envelopes, dry-run, --yes safeguards, and actionable error hints."
 ---
 
 # OmniRoute Remote CLI
@@ -120,6 +120,20 @@ node skills/omni-remote-cli/scripts/omniroute-remote.mjs cache:clear --yes --out
 node skills/omni-remote-cli/scripts/omniroute-remote.mjs usage:quota --output pretty
 node skills/omni-remote-cli/scripts/omniroute-remote.mjs version:status --output pretty
 ```
+
+Platform logs:
+
+```bash
+node skills/omni-remote-cli/scripts/omniroute-remote.mjs logs:console --query level=error --query limit=200 --output pretty
+node skills/omni-remote-cli/scripts/omniroute-remote.mjs logs:detail --query limit=50 --output pretty
+node skills/omni-remote-cli/scripts/omniroute-remote.mjs logs:get <logId> --output pretty
+node skills/omni-remote-cli/scripts/omniroute-remote.mjs logs:export --query hours=24 --query type=call-logs --output pretty
+node skills/omni-remote-cli/scripts/omniroute-remote.mjs logs:analyze --hours 24 --limit 500 --output pretty
+```
+
+`logs:analyze` locally summarizes console errors, failed calls, slow calls, status buckets,
+recent failures, and troubleshooting recommendations. It never sends log content to a third-party
+service.
 
 Raw API calls:
 

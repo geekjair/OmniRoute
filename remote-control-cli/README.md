@@ -69,6 +69,12 @@ node remote-control-cli/omniroute-remote.mjs cache:stats --output pretty
 node remote-control-cli/omniroute-remote.mjs cache:clear --dry-run --output pretty
 node remote-control-cli/omniroute-remote.mjs version:status --output pretty
 
+# 平台日志读取与分析
+node remote-control-cli/omniroute-remote.mjs logs:console --query level=error --query limit=200 --output pretty
+node remote-control-cli/omniroute-remote.mjs logs:detail --query limit=50 --output pretty
+node remote-control-cli/omniroute-remote.mjs logs:export --query hours=24 --query type=call-logs --output pretty
+node remote-control-cli/omniroute-remote.mjs logs:analyze --hours 24 --limit 500 --output pretty
+
 # 调用任意真实 API 路径
 node remote-control-cli/omniroute-remote.mjs raw GET /api/health/ping --output pretty
 node remote-control-cli/omniroute-remote.mjs raw PATCH /api/settings --data '{"requireLogin":true}' --yes
@@ -105,8 +111,22 @@ node remote-control-cli/omniroute-remote.mjs schema --output pretty
 - `/api/cache/stats`
 - `/api/provider-metrics`
 - `/api/usage/quota`
+- `/api/logs/console`
+- `/api/logs/detail`
+- `/api/logs/{id}`
+- `/api/logs/export`
 - `/api/version-manager/status`
 - `/api/version-manager/start`
 - `/api/version-manager/stop`
 - `/api/version-manager/restart`
 - `/api/shutdown`
+
+## 日志分析输出
+
+`logs:analyze` 会读取 `/api/logs/console` 和 `/api/logs/export?type=call-logs`，在本地汇总：
+
+- `summary`：控制台日志数、调用日志数、错误数、失败调用数、慢请求数、成功率
+- `distributions`：组件、错误组件、失败 Provider、失败模型、HTTP 状态分布
+- `recentErrors`：最近错误日志摘要
+- `recentFailedCalls`：最近失败调用摘要
+- `recommendations`：面向排障的下一步建议

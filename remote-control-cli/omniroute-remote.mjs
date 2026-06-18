@@ -143,6 +143,42 @@ const COMMANDS = [
     description: "读取配额使用情况",
   },
   {
+    name: "logs:console",
+    method: "GET",
+    path: "/api/logs/console",
+    auth: true,
+    description: "读取最近 1 小时平台控制台日志，支持 --query level=error --query limit=200 --query component=COMBO",
+  },
+  {
+    name: "logs:detail",
+    method: "GET",
+    path: "/api/logs/detail",
+    auth: true,
+    description: "读取详细请求日志和采集开关，支持 --query limit=50 --query offset=0",
+  },
+  {
+    name: "logs:get",
+    method: "GET",
+    path: "/api/logs/{id}",
+    auth: true,
+    params: ["id"],
+    description: "按请求日志 ID 查看流水线详情",
+  },
+  {
+    name: "logs:export",
+    method: "GET",
+    path: "/api/logs/export",
+    auth: true,
+    description: "导出平台日志，支持 --query hours=24 --query type=call-logs|request-logs|proxy-logs",
+  },
+  {
+    name: "logs:analyze",
+    method: "LOCAL",
+    path: "local:logs-analysis",
+    auth: true,
+    description: "读取控制台日志和 call_logs 导出，在本地汇总错误、失败调用、慢请求和排查建议",
+  },
+  {
     name: "version:status",
     method: "GET",
     path: "/api/version-manager/status",
@@ -209,6 +245,8 @@ function main(argv) {
       return configSet(parsed.args, parsed.flags);
     case "config:unset":
       return configUnset(parsed.args, parsed.flags);
+    case "logs:analyze":
+      return analyzeLogs(parsed.flags);
     case "raw":
       return runRaw(parsed.args, parsed.flags);
     default:
@@ -262,6 +300,12 @@ async function runRaw(args, flags) {
 }
 
 async function request({ method, path, auth, bodyRequired, write, dangerous, flags }) {
+  const result = await performRequest({ method, path, auth, bodyRequired, write, dangerous, flags });
+  await writeData(result.payload, flags);
+  return result.payload.ok ? 0 : 1;
+}
+
+async function performRequest({ method, path, auth, bodyRequired, write, dangerous, flags }) {
   const config = readConfig();
   const baseUrl = normalizeBaseUrl(
     flags.url || process.env.OMNIROUTE_REMOTE_URL || config.url || DEFAULT_BASE_URL
@@ -316,7 +360,7 @@ async function request({ method, path, auth, bodyRequired, write, dangerous, fla
     body: body === undefined ? null : JSON.parse(body),
   };
   if (dryRun) {
-    return writeData({ ok: true, data: preview, _meta: meta("dry_run") }, flags);
+    return { payload: { ok: true, data: preview, _meta: meta("dry_run") } };
   }
 
   const startedAt = Date.now();
@@ -367,8 +411,59 @@ async function request({ method, path, auth, bodyRequired, write, dangerous, fla
     },
   };
 
-  writeData(payload, flags);
-  return response.ok ? 0 : 1;
+  return { payload, response, responseText };
+}
+
+async function analyzeLogs(flags) {
+  const consoleLimit = numberFlag(flags.limit || 500, 500);
+  const hours = numberFlag(flags.hours || 24, 24);
+  const consoleQuery = [`limit=${Math.min(consoleLimit, 2000)}`];
+  if (flags.level) consoleQuery.push(`level=${flags.level}`);
+  if (flags.component) consoleQuery.push(`component=${flags.component}`);
+
+  const consoleResult = await performRequest({
+    method: "GET",
+    path: "/api/logs/console",
+    auth: true,
+    bodyRequired: false,
+    write: false,
+    dangerous: false,
+    flags: { ...flags, query: consoleQuery },
+  });
+  if (!consoleResult.payload.ok) {
+    writeData(consoleResult.payload, flags);
+    return 1;
+  }
+
+  const exportResult = await performRequest({
+    method: "GET",
+    path: "/api/logs/export",
+    auth: true,
+    bodyRequired: false,
+    write: false,
+    dangerous: false,
+    flags: { ...flags, query: [`hours=${Math.min(hours, 168)}`, "type=call-logs"] },
+  });
+
+  const consoleLogs = Array.isArray(consoleResult.payload.data) ? consoleResult.payload.data : [];
+  const callLogs = exportResult.payload.ok
+    ? normalizeLogs(exportResult.payload.data?.logs || exportResult.payload.data || [])
+    : [];
+  const analysis = buildLogAnalysis({ consoleLogs, callLogs, hours });
+
+  return writeData(
+    {
+      ok: true,
+      data: analysis,
+      _meta: {
+        ...meta("logs:analyze"),
+        consoleStatus: consoleResult.payload._meta?.status,
+        exportStatus: exportResult.payload._meta?.status,
+        exportAvailable: exportResult.payload.ok,
+      },
+    },
+    flags
+  );
 }
 
 function configInit(flags) {
@@ -428,6 +523,203 @@ function configUnset(args, flags) {
   delete config[key];
   writeConfig(config);
   return writeData({ ok: true, data: redactConfig(config), _meta: meta("config:unset") }, flags);
+}
+
+function normalizeLogs(value) {
+  if (Array.isArray(value)) return value;
+  if (value && typeof value === "object") {
+    if (Array.isArray(value.logs)) return value.logs;
+    if (Array.isArray(value.data)) return value.data;
+    if (Array.isArray(value.items)) return value.items;
+  }
+  return [];
+}
+
+function buildLogAnalysis({ consoleLogs, callLogs, hours }) {
+  const normalizedConsole = consoleLogs.map(normalizeConsoleEntry);
+  const normalizedCalls = callLogs.map(normalizeCallEntry);
+  const failedCalls = normalizedCalls.filter((entry) => isFailureStatus(entry.status));
+  const slowCalls = normalizedCalls.filter((entry) => Number(entry.durationMs) >= 10000);
+  const errorConsoleLogs = normalizedConsole.filter((entry) => isErrorLevel(entry.level));
+  const warnConsoleLogs = normalizedConsole.filter((entry) => entry.level === "warn");
+  const topComponents = topCounts(normalizedConsole, (entry) => entry.component || entry.module || "unknown");
+  const topErrorComponents = topCounts(errorConsoleLogs, (entry) => entry.component || entry.module || "unknown");
+  const topFailedProviders = topCounts(failedCalls, (entry) => entry.provider || "unknown");
+  const topFailedModels = topCounts(failedCalls, (entry) => entry.model || entry.requestedModel || "unknown");
+  const statusBuckets = topCounts(normalizedCalls, (entry) => statusBucket(entry.status));
+  const recentErrors = errorConsoleLogs.slice(-10).reverse().map(pickConsoleSummary);
+  const recentFailedCalls = failedCalls.slice(-10).reverse().map(pickCallSummary);
+  const recommendations = buildRecommendations({
+    errorConsoleLogs,
+    warnConsoleLogs,
+    failedCalls,
+    slowCalls,
+    topErrorComponents,
+    topFailedProviders,
+    exportCallLogsCount: normalizedCalls.length,
+  });
+
+  return {
+    summary: {
+      hours,
+      consoleLogs: normalizedConsole.length,
+      callLogs: normalizedCalls.length,
+      errorConsoleLogs: errorConsoleLogs.length,
+      warnConsoleLogs: warnConsoleLogs.length,
+      failedCalls: failedCalls.length,
+      slowCalls: slowCalls.length,
+      successRate:
+        normalizedCalls.length > 0
+          ? Number(((normalizedCalls.length - failedCalls.length) / normalizedCalls.length).toFixed(4))
+          : null,
+    },
+    distributions: {
+      topComponents,
+      topErrorComponents,
+      topFailedProviders,
+      topFailedModels,
+      statusBuckets,
+    },
+    recentErrors,
+    recentFailedCalls,
+    recommendations,
+  };
+}
+
+function normalizeConsoleEntry(entry) {
+  const level = parseLevel(entry?.level || entry?.severity || "info");
+  return {
+    timestamp: entry?.timestamp || entry?.time || null,
+    level,
+    component: stringifyValue(entry?.component || entry?.module || ""),
+    module: stringifyValue(entry?.module || ""),
+    message: stringifyValue(entry?.message || entry?.msg || entry?.error || ""),
+    correlationId: stringifyValue(entry?.correlationId || entry?.requestId || ""),
+  };
+}
+
+function normalizeCallEntry(entry) {
+  return {
+    id: entry?.id || entry?.requestId || "",
+    timestamp: entry?.timestamp || entry?.createdAt || entry?.time || null,
+    status: Number(entry?.status ?? entry?.statusCode ?? entry?.httpStatus ?? 0),
+    provider: stringifyValue(entry?.provider || entry?.providerId || entry?.targetProvider || ""),
+    model: stringifyValue(entry?.model || entry?.actualModel || ""),
+    requestedModel: stringifyValue(entry?.requestedModel || entry?.requested_model || ""),
+    path: stringifyValue(entry?.path || entry?.endpoint || entry?.requestPath || ""),
+    durationMs: Number(entry?.durationMs ?? entry?.duration_ms ?? entry?.duration ?? 0),
+    error: stringifyValue(entry?.error || entry?.errorMessage || entry?.message || ""),
+  };
+}
+
+function parseLevel(raw) {
+  const numeric = Number(raw);
+  if (Number.isFinite(numeric)) {
+    if (numeric >= 60) return "fatal";
+    if (numeric >= 50) return "error";
+    if (numeric >= 40) return "warn";
+    if (numeric >= 30) return "info";
+    if (numeric >= 20) return "debug";
+    return "trace";
+  }
+  return String(raw || "info").toLowerCase();
+}
+
+function stringifyValue(value) {
+  if (value === undefined || value === null) return "";
+  if (typeof value === "string") return value;
+  if (value instanceof Error) return value.message || value.name;
+  if (["number", "boolean", "bigint"].includes(typeof value)) return String(value);
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function isErrorLevel(level) {
+  return level === "error" || level === "fatal";
+}
+
+function isFailureStatus(status) {
+  return Number(status) >= 400 || Number(status) === 0;
+}
+
+function statusBucket(status) {
+  const code = Number(status);
+  if (!code) return "unknown";
+  if (code < 300) return "2xx";
+  if (code < 400) return "3xx";
+  if (code < 500) return "4xx";
+  return "5xx";
+}
+
+function topCounts(items, selector, limit = 8) {
+  const counts = new Map();
+  for (const item of items) {
+    const key = selector(item) || "unknown";
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  return [...counts.entries()]
+    .sort((left, right) => right[1] - left[1] || String(left[0]).localeCompare(String(right[0])))
+    .slice(0, limit)
+    .map(([key, count]) => ({ key, count }));
+}
+
+function pickConsoleSummary(entry) {
+  return {
+    timestamp: entry.timestamp,
+    level: entry.level,
+    component: entry.component || entry.module || "unknown",
+    message: entry.message.slice(0, 500),
+    correlationId: entry.correlationId || undefined,
+  };
+}
+
+function pickCallSummary(entry) {
+  return {
+    id: entry.id || undefined,
+    timestamp: entry.timestamp,
+    status: entry.status || undefined,
+    provider: entry.provider || undefined,
+    model: entry.model || entry.requestedModel || undefined,
+    path: entry.path || undefined,
+    durationMs: entry.durationMs || undefined,
+    error: entry.error ? entry.error.slice(0, 500) : undefined,
+  };
+}
+
+function buildRecommendations({
+  errorConsoleLogs,
+  warnConsoleLogs,
+  failedCalls,
+  slowCalls,
+  topErrorComponents,
+  topFailedProviders,
+  exportCallLogsCount,
+}) {
+  const recommendations = [];
+  if (errorConsoleLogs.length > 0) {
+    const component = topErrorComponents[0]?.key || "unknown";
+    recommendations.push(`优先排查 ${component} 组件：最近控制台错误 ${errorConsoleLogs.length} 条。`);
+  }
+  if (failedCalls.length > 0) {
+    const provider = topFailedProviders[0]?.key || "unknown";
+    recommendations.push(`检查 ${provider} Provider/模型配置：失败调用 ${failedCalls.length} 条。`);
+  }
+  if (slowCalls.length > 0) {
+    recommendations.push(`关注慢请求：${slowCalls.length} 条调用耗时 >= 10s，可结合 Combo fallback 与上游延迟排查。`);
+  }
+  if (warnConsoleLogs.length > errorConsoleLogs.length * 3 && warnConsoleLogs.length > 10) {
+    recommendations.push(`警告日志较多：${warnConsoleLogs.length} 条，建议按 component 过滤定位噪声源。`);
+  }
+  if (exportCallLogsCount === 0) {
+    recommendations.push("未获取到 call_logs 导出数据；如果需要请求级分析，请确认日志采集和管理权限。 ");
+  }
+  if (recommendations.length === 0) {
+    recommendations.push("未发现明显错误峰值；可扩大 --hours 或降低 --level 获取更多上下文。 ");
+  }
+  return recommendations;
 }
 
 function parseArgs(argv) {
@@ -592,10 +884,10 @@ function hintForStatus(status) {
   return "检查请求参数和 JSON 请求体。";
 }
 
-function writeData(payload, flags = {}) {
+async function writeData(payload, flags = {}) {
   const output = flags.output || "json";
   if (output === "pretty") {
-    process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
+    await writeStream(process.stdout, `${JSON.stringify(payload, null, 2)}\n`);
     return payload.ok ? 0 : 1;
   }
   if (output !== "json") {
@@ -606,11 +898,11 @@ function writeData(payload, flags = {}) {
       2
     );
   }
-  process.stdout.write(`${JSON.stringify(payload)}\n`);
+  await writeStream(process.stdout, `${JSON.stringify(payload)}\n`);
   return payload.ok ? 0 : 1;
 }
 
-function writeError(error) {
+async function writeError(error) {
   const body = {
     ok: false,
     error: {
@@ -619,8 +911,27 @@ function writeError(error) {
       hint: error.hint || "查看 `--help` 或 `commands` 输出。",
     },
   };
-  process.stderr.write(`${JSON.stringify(body)}\n`);
+  await writeStream(process.stderr, `${JSON.stringify(body)}\n`);
   return error.exitCode || 1;
+}
+
+function writeStream(stream, text) {
+  return new Promise((resolve, reject) => {
+    const onError = (error) => {
+      stream.off("drain", onDrain);
+      reject(error);
+    };
+    const onDrain = () => {
+      stream.off("error", onError);
+      resolve();
+    };
+    stream.once("error", onError);
+    if (stream.write(text)) {
+      queueMicrotask(onDrain);
+    } else {
+      stream.once("drain", onDrain);
+    }
+  });
 }
 
 function printHelp() {
@@ -639,6 +950,10 @@ function printHelp() {
     "  combos:get <id>              查看 Combo",
     "  settings:get                 读取设置",
     "  cache:stats                  查看缓存统计",
+    "  logs:console                 读取平台控制台日志",
+    "  logs:detail                  读取详细请求日志",
+    "  logs:export                  导出调用/请求/代理日志",
+    "  logs:analyze                 汇总错误、失败调用和排查建议",
     "  version:status               查看受管工具状态",
     "  raw METHOD PATH              调用任意平台 API",
     "",
@@ -752,6 +1067,6 @@ if (invokedPath) {
       process.exit(typeof exitCode === "number" ? exitCode : 0);
     })
     .catch((error) => {
-      process.exit(writeError(error));
+      return writeError(error).then((exitCode) => process.exit(exitCode));
     });
 }
