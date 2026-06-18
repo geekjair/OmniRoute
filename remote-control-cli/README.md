@@ -55,6 +55,15 @@ node remote-control-cli/omniroute-remote.mjs ping --output pretty
 node remote-control-cli/omniroute-remote.mjs providers:list --output pretty
 node remote-control-cli/omniroute-remote.mjs providers:get <providerConnectionId> --output pretty
 node remote-control-cli/omniroute-remote.mjs providers:test <providerConnectionId> --yes --output pretty
+node remote-control-cli/omniroute-remote.mjs providers:create --file provider.json --dry-run --output pretty
+node remote-control-cli/omniroute-remote.mjs providers:create --file provider.json --yes --output pretty
+node remote-control-cli/omniroute-remote.mjs providers:update <providerConnectionId> --file provider.patch.json --dry-run --output pretty
+node remote-control-cli/omniroute-remote.mjs providers:update <providerConnectionId> --file provider.patch.json --yes --output pretty
+node remote-control-cli/omniroute-remote.mjs providers:delete <providerConnectionId> --dry-run --output pretty
+node remote-control-cli/omniroute-remote.mjs providers:delete <providerConnectionId> --yes --output pretty
+node remote-control-cli/omniroute-remote.mjs provider-nodes:list --output pretty
+node remote-control-cli/omniroute-remote.mjs provider-nodes:create --file provider-node.json --dry-run --output pretty
+node remote-control-cli/omniroute-remote.mjs provider-nodes:create --file provider-node.json --yes --output pretty
 node remote-control-cli/omniroute-remote.mjs models:list --query all=true --output pretty
 node remote-control-cli/omniroute-remote.mjs combos:list --output pretty
 node remote-control-cli/omniroute-remote.mjs combos:get <comboId> --output pretty
@@ -104,6 +113,9 @@ node remote-control-cli/omniroute-remote.mjs schema --output pretty
 - `/api/providers`
 - `/api/providers/{id}`
 - `/api/providers/{id}/test`
+- `/api/provider-nodes`
+- `/api/provider-nodes/{id}`
+- `/api/provider-nodes/validate`
 - `/api/models`
 - `/api/combos`
 - `/api/combos/{id}`
