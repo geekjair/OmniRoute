@@ -30,18 +30,59 @@ const STREAMING_RESPONSE_HEADER_DENYLIST = new Set([
   "x-accel-buffering",
 ]);
 
+const DEFAULT_FORWARDED_HEADER_BUDGET_BYTES = 768;
+
+/**
+ * Resolve the forwarded upstream response-header budget from an optional string value
+ * (typically `process.env.OMNIROUTE_FORWARDING_HEADER_BUDGET_BYTES`). Returns the
+ * default of 768 when the input is unset, empty, or non-positive.
+ * Extracted as a pure function so unit tests can pass values directly without
+ * module-cache manipulation.
+ */
+export function resolveForwardedHeaderBudget(env?: string): number {
+  const parsed = Number.parseInt(
+    String(env ?? process.env.OMNIROUTE_FORWARDING_HEADER_BUDGET_BYTES),
+    10
+  );
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_FORWARDED_HEADER_BUDGET_BYTES;
+}
+
 /**
  * Keep upstream-derived headers comfortably below common reverse-proxy response-header limits.
  * This budget includes each header name, separator, value, and trailing CRLF. OmniRoute's own
  * response metadata and framework/security headers are added separately.
+ * Override with `OMNIROUTE_FORWARDING_HEADER_BUDGET_BYTES`.
  */
-export const MAX_FORWARDED_UPSTREAM_RESPONSE_HEADER_BYTES = 768;
+export const MAX_FORWARDED_UPSTREAM_RESPONSE_HEADER_BYTES = resolveForwardedHeaderBudget();
 const MAX_LOGGED_DROPPED_RESPONSE_HEADERS = 20;
 const responseHeaderEncoder = new TextEncoder();
 
 type ResponseHeaderLogger = {
   warn?: (tag: string, message: string, data?: Record<string, unknown>) => void;
+  debug?: (tag: string, message: string, data?: Record<string, unknown>) => void;
 } | null;
+
+/**
+ * #10315: the dropped-header set is usually identical across responses from the
+ * same upstream, so warn once per unique drop fingerprint per process, then log
+ * at debug level — a per-SSE-response warn storm buries real errors and adds
+ * event-loop serialization work. Fingerprints are dropped-header-name sets, so
+ * the set stays bounded by the distinct upstream header shapes in practice.
+ */
+const DROPPED_HEADER_WARN_FINGERPRINT_LIMIT = 1000;
+const droppedHeaderWarnFingerprints = new Set<string>();
+
+export function fingerprintDroppedHeaders(dropped: Array<{ name: string; bytes: number }>): string {
+  return dropped
+    .map((header) => header.name.toLowerCase())
+    .sort()
+    .join(",");
+}
+
+/** Test hook: forget already-warned drop fingerprints. */
+export function resetDroppedHeaderWarnFingerprints(): void {
+  droppedHeaderWarnFingerprints.clear();
+}
 
 function responseHeaderWireBytes(name: string, value: string): number {
   return responseHeaderEncoder.encode(`${name}: ${value}\r\n`).byteLength;
@@ -167,12 +208,30 @@ export function buildStreamingResponseHeaders(
   }
 
   if (droppedHeaders.length > 0) {
-    log?.warn?.("HTTP", "Dropped upstream response headers that exceeded forwarding budget", {
+    const dropPayload = {
       budgetBytes: MAX_FORWARDED_UPSTREAM_RESPONSE_HEADER_BYTES,
       forwardedBytes,
       droppedCount: droppedHeaders.length,
       droppedHeaders: droppedHeaders.slice(0, MAX_LOGGED_DROPPED_RESPONSE_HEADERS),
-    });
+    };
+    const fingerprint = fingerprintDroppedHeaders(droppedHeaders);
+    if (droppedHeaderWarnFingerprints.has(fingerprint)) {
+      log?.debug?.(
+        "HTTP",
+        "Dropped upstream response headers that exceeded forwarding budget (already warned once for this drop set)",
+        dropPayload
+      );
+    } else {
+      if (droppedHeaderWarnFingerprints.size >= DROPPED_HEADER_WARN_FINGERPRINT_LIMIT) {
+        droppedHeaderWarnFingerprints.clear();
+      }
+      droppedHeaderWarnFingerprints.add(fingerprint);
+      log?.warn?.(
+        "HTTP",
+        "Dropped upstream response headers that exceeded forwarding budget",
+        dropPayload
+      );
+    }
   }
 
   const responseHeaders: Record<string, string> = {
