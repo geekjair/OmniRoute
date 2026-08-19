@@ -1,0 +1,36 @@
+sources:
+  my_repo:
+    type: codeup
+    name: omniroute
+    endpoint: "https://codeup.aliyun.com/6524089da3bbd14127c02dcf/geekjair/omniroute.git"
+    branch: master
+    certificate:
+      type: serviceConnection
+      serviceConnection: ttgosabcmmynr1tz
+
+stages:
+  command_stage:
+    name: 执行命令
+    jobs:
+      docker_build_push_acr_base:
+        name: 构建并推送 OmniRoute base 镜像
+        runsOn:
+          group: public/cn-hongkong
+          container: build-steps-public-registry.cn-hongkong.cr.aliyuncs.com/build-steps/alinux3:latest
+        steps:
+          docker_build_push_acr_base:
+            step: DockerBuildPushACR
+            name: 构建并推送 base 镜像
+            with:
+              serviceConnection: nomx8kedqr67kijw
+              artifact: omniroute_base
+              region: cn-hangzhou
+              dockerRegistry: crpi-vt792787r1mllnzl.cn-hangzhou.personal.cr.aliyuncs.com/memos-wj/omniroute
+              dockerTag: latest
+              dockerfilePath: Dockerfile
+              dockerfileContext: .
+              buildArgs: |
+                OMNIROUTE_USE_TURBOPACK=1
+                OMNIROUTE_BUILD_MEMORY_MB=4096
+              target: runner-base
+              cacheType: remote

@@ -1,5 +1,6 @@
 # ── Common base with runtime deps ──────────────────────────────────────────
-FROM node:26-trixie-slim AS base
+ARG BASE_IMAGE=node:26-trixie-slim
+FROM ${BASE_IMAGE} AS base
 WORKDIR /app
 
 # `apt-get upgrade` pulls the security-patched versions of the Debian (trixie)
