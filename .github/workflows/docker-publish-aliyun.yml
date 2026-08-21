@@ -58,6 +58,8 @@ jobs:
           target: runner-base
           platforms: linux/amd64
           push: true
+          provenance: false
+          sbom: false
           tags: |
             ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ env.REPO }}:${{ steps.tag.outputs.tag }}
             ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ env.REPO }}:base
@@ -71,6 +73,8 @@ jobs:
           target: runner-web
           platforms: linux/amd64
           push: true
+          provenance: false
+          sbom: false
           tags: |
             ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ env.REPO }}:web
           cache-from: type=gha,scope=aliyun-web
