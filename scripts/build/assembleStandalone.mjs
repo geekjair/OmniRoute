@@ -99,30 +99,7 @@ export const NATIVE_ASSET_ENTRIES = [
     src: ["node_modules", "onnxruntime-node", "bin"],
     dest: ["node_modules", "onnxruntime-node", "bin"],
   },
-  {
-    // @huggingface/transformers pins its own onnxruntime-node version (e.g.
-    // 1.24.3) separately from the root dependency (currently ~1.27.0). npm
-    // installs this copy under the package's node_modules, and that is the
-    // copy transformers resolves at runtime. Copy its native binaries into the
-    // standalone tree so the dynamic libonnxruntime.so.1 load succeeds.
-    label: "onnxruntime-node native binaries for @huggingface/transformers nested copy",
-    src: [
-      "node_modules",
-      "@huggingface",
-      "transformers",
-      "node_modules",
-      "onnxruntime-node",
-      "bin",
-    ],
-    dest: [
-      "node_modules",
-      "@huggingface",
-      "transformers",
-      "node_modules",
-      "onnxruntime-node",
-      "bin",
-    ],
-  },
+
   {
     // TPROXY IP_TRANSPARENT addon (Fase 3 / Epic A). Built by build-tproxy-native
     // before assembly; Linux-only + opt-in, so the source is absent on non-Linux
