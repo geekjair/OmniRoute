@@ -65,17 +65,3 @@ jobs:
             ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ env.REPO }}:base
           cache-from: type=gha,scope=aliyun-base
           cache-to: type=gha,scope=aliyun-base,mode=max
-
-      - name: Build and push web image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          target: runner-web
-          platforms: linux/amd64
-          push: true
-          provenance: false
-          sbom: false
-          tags: |
-            ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ env.REPO }}:web
-          cache-from: type=gha,scope=aliyun-web
-          cache-to: type=gha,scope=aliyun-web,mode=max
