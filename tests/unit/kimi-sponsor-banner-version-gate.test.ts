@@ -2,10 +2,10 @@
 // See src/app/(dashboard)/dashboard/kimiSponsorBannerGate.ts.
 import test from "node:test";
 import assert from "node:assert/strict";
+import { APP_CONFIG } from "../../src/shared/constants/appConfig.ts";
 
-const kimiSponsorBanner = await import(
-  "../../src/app/(dashboard)/dashboard/kimiSponsorBannerGate.ts"
-);
+const kimiSponsorBanner =
+  await import("../../src/app/(dashboard)/dashboard/kimiSponsorBannerGate.ts");
 
 test("KIMI_SPONSOR_BANNER_THROUGH_VERSION is the agreed sunset version", () => {
   assert.equal(kimiSponsorBanner.KIMI_SPONSOR_BANNER_THROUGH_VERSION, "3.8.60");
@@ -43,4 +43,13 @@ test("fails safe (hides) for unparsable/sentinel version strings", () => {
   assert.equal(kimiSponsorBanner.shouldShowKimiSponsorBanner(""), false);
   assert.equal(kimiSponsorBanner.shouldShowKimiSponsorBanner(null), false);
   assert.equal(kimiSponsorBanner.shouldShowKimiSponsorBanner(undefined), false);
+});
+
+test("APP_CONFIG.version carries the '-test' deployment marker", () => {
+  assert.ok(
+    APP_CONFIG.version.endsWith("-test"),
+    `expected -test suffix, got ${APP_CONFIG.version}`
+  );
+  // The suffix must be inert for every semver comparison (normalizeVersion strips it).
+  assert.equal(kimiSponsorBanner.shouldShowKimiSponsorBanner(APP_CONFIG.version), true);
 });
