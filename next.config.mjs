@@ -9,6 +9,7 @@ import {
   nonPageRoutePrefixes,
   resolveDashboardEmbedMode,
 } from "./scripts/build/dashboardEmbed.mjs";
+import { resolveBuildTimestamp } from "./scripts/build/buildTimestamp.mjs";
 
 const withNextIntl = createNextIntlPlugin("./src/i18n/request.ts");
 const distDir = process.env.NEXT_DIST_DIR || ".build/next";
@@ -119,6 +120,9 @@ const nextConfig = {
   // examples. Empty by default (root deploys unchanged).
   env: {
     NEXT_PUBLIC_OMNIROUTE_BASE_PATH: normalizeBasePath(process.env.OMNIROUTE_BASE_PATH),
+    // "YYYYmmdd HHmmss" stamped at config-load time (every `next build`/`next
+    // dev` run); surfaced in the sidebar footer as a deployment-freshness marker.
+    NEXT_PUBLIC_BUILD_TIMESTAMP: resolveBuildTimestamp(process.env),
   },
   distDir,
   // Turbopack config: redirect native modules to stubs at build time

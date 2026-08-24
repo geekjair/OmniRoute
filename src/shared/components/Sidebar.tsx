@@ -704,6 +704,14 @@ export default function Sidebar({
             {!collapsed && <span className="truncate">{t("shutdown")}</span>}
           </button>
         </div>
+        {!collapsed && APP_CONFIG.buildTimestamp && (
+          <p
+            className="shrink-0 px-2 pb-1.5 text-center text-[10px] text-text-muted/70 tabular-nums"
+            title="build time"
+          >
+            {APP_CONFIG.buildTimestamp}
+          </p>
+        )}
       </aside>
 
       {/* Styled tooltip for collapsed (mini) sidebar */}
